@@ -8,8 +8,8 @@ import { pathfinder, Movements } from 'mineflayer-pathfinder';
 import { msg, msgSections } from './ui.js';
 
 const FATAL_CODES = new Set(['ENOTFOUND', 'ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET']);
-const MAX_RECONNECTS = 5;
-const RECONNECT_DELAY_MS = 15_000;
+const INITIAL_RECONNECT_DELAY_MS = 15_000;
+const MAX_RECONNECT_DELAY_MS = 5 * 60_000;
 const ANTI_AFK_INTERVAL_MS = 5_000;
 const MC_CHAT_LIMIT = 256;
 
@@ -75,6 +75,8 @@ export class MinecraftBot {
     this.reconnectAttempts = 0;
     this.spawnedOnce = false;
     this.realUsername = null;
+    this.heartbeatInterval = null;
+    this.lastPacketTime = null;
 
     // FIX: Accept an externally injected password from BotManager so that
     // a !leave + !join cycle on the same server reuses the original registered
@@ -125,11 +127,12 @@ export class MinecraftBot {
         (data) => {
           // Only called when a new login is actually needed (no valid cached token)
           const mins = Math.floor((data.expires_in || 900) / 60);
+          const userIdentifier = this.options.username.startsWith('AFK_') ? this.options.username : `User (${this.options.username})`;
           this.send(
             msgSections(
-              `Microsoft login required — **${this.options.host}**`,
-              `Open: <${data.verification_uri}>\n\nCode: \`${data.user_code}\``,
-              `-# Expires in ${mins} min. Bot joins automatically after sign-in.`
+              `🔑 **Microsoft Authentication Required**`,
+              `To connect **${userIdentifier}** to **${this.options.host}**:\n\n1. Open: <${data.verification_uri}>\n2. Enter code: \`${data.user_code}\``,
+              `-# ⏳ Expires in ${mins} minutes. The bot will join automatically after sign-in.`
             )
           );
         }
@@ -145,7 +148,7 @@ export class MinecraftBot {
       if (!this.isFatal && !this.isStopping) {
         this.isFatal = true;
         this.send(
-          msg(`Microsoft authentication failed\n-# ${err.message || String(err)} · bot removed`)
+          msg(`❌ **Authentication Failed**\nMicrosoft authentication failed for **${this.options.username}**.\n-# ⚠️ ${err.message || String(err)} · Bot removed from list.`)
         );
         if (this.onFatal) this.onFatal();
       }
@@ -196,6 +199,14 @@ export class MinecraftBot {
     this.bot = mineflayer.createBot(botOptions);
     this.bot.loadPlugin(pathfinder);
 
+    // Track last packet time to detect ghost connections
+    this.bot.once('inject_allowed', () => {
+      this.lastPacketTime = Date.now();
+      this.bot._client.on('packet', () => {
+        this.lastPacketTime = Date.now();
+      });
+    });
+
     this.bot.on('spawn', () => {
       // FIX: Guard — if stop() was called between createBot and spawn, abort
       if (this.isStopping || this.isFatal) return;
@@ -211,14 +222,16 @@ export class MinecraftBot {
         this.onRealUsername(name);
       }
 
-      this.send(msg(`**${name}** connected to **${this.options.host}**`));
+      this.send(msg(`🟢 **Connected**\n**${name}** has successfully joined **${this.options.host}**.`));
       this.startAntiAfk();
+      this.startHeartbeat();
 
       // Automatically send /smp after 15 seconds
       if (this.smpTimeout) clearTimeout(this.smpTimeout);
       this.smpTimeout = setTimeout(() => {
         if (this.bot && !this.isStopping) {
           this.bot.chat('/smp');
+          this.send(msg(`🚀 **SMP Entered**\n**${name}** has entered the SMP server.`));
         }
       }, 15_000);
 
@@ -255,7 +268,7 @@ export class MinecraftBot {
         this.isFatal = true;
         const name = this.realUsername || this.options.username;
         this.send(
-          msg(`**${name}** — cannot reach **${this.options.host}**\n-# ${err.code} · bot removed`)
+          msg(`⚠️ **Connection Error**\n**${name}** cannot reach **${this.options.host}**.\n-# 🔍 Reason: \`${err.code}\` · Bot removed from list.`)
         );
         this.stop();
         if (this.onFatal) this.onFatal();
@@ -269,8 +282,8 @@ export class MinecraftBot {
       const readable = parseKickReason(reason);
       this.send(
         msgSections(
-          `**${name}** kicked from **${this.options.host}**`,
-          `-# ${readable}`
+          `🟥 **Kicked from Server**\n**${name}** was kicked from **${this.options.host}**`,
+          `> ${readable}`
         )
       );
       this.handleDisconnect();
@@ -289,28 +302,32 @@ export class MinecraftBot {
   handleDisconnect() {
     if (this.isStopping || this.isFatal) return;
     this.stopAntiAfk();
+    this.stopHeartbeat();
 
-    const name = this.realUsername || this.options.username;
-
-    if (this.reconnectAttempts >= MAX_RECONNECTS) {
-      this.send(
-        msg(`**${name}** — max reconnects reached\n-# removed after ${MAX_RECONNECTS} failed attempts`)
-      );
-      this.stop();
-      if (this.onFatal) this.onFatal();
-      return;
+    if (this.bot) {
+      this.bot.removeAllListeners();
+      try { this.bot.quit(); } catch { }
+      this.bot = null;
     }
 
+    const name = this.realUsername || this.options.username;
     this.reconnectAttempts++;
-    const delaySec = RECONNECT_DELAY_MS / 1000;
+
+    // Exponential Backoff: double the delay each attempt, cap at MAX_RECONNECT_DELAY_MS
+    const delayMs = Math.min(
+      INITIAL_RECONNECT_DELAY_MS * Math.pow(2, this.reconnectAttempts - 1),
+      MAX_RECONNECT_DELAY_MS
+    );
+    const delaySec = delayMs / 1000;
+
     this.send(
       msg(
-        `**${name}** — reconnecting to **${this.options.host}**\n-# attempt ${this.reconnectAttempts}/${MAX_RECONNECTS} · in ${delaySec}s`
+        `🔄 **Reconnecting**\n**${name}** disconnected. Attempting to rejoin **${this.options.host}**...\n-# ⏳ Attempt #${this.reconnectAttempts} · Waiting ${delaySec}s before retrying`
       )
     );
 
     if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
-    this.reconnectTimeout = setTimeout(() => this.connect().catch(() => { }), RECONNECT_DELAY_MS);
+    this.reconnectTimeout = setTimeout(() => this.connect().catch(() => { }), delayMs);
   }
 
   startAntiAfk() {
@@ -330,6 +347,28 @@ export class MinecraftBot {
     if (this.lookInterval) { clearInterval(this.lookInterval); this.lookInterval = null; }
   }
 
+  startHeartbeat() {
+    this.stopHeartbeat();
+    this.lastPacketTime = Date.now();
+    this.heartbeatInterval = setInterval(() => {
+      if (this.bot && this.lastPacketTime && (Date.now() - this.lastPacketTime > 60_000)) {
+        const name = this.realUsername || this.options.username;
+        this.send(
+          msg(`👻 **Ghost Connection Detected**\n**${name}** hasn't received server packets for 60 seconds. Reconnecting to fix...`)
+        );
+        this.handleDisconnect();
+      }
+    }, 30_000);
+  }
+
+  stopHeartbeat() {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+    this.lastPacketTime = null;
+  }
+
   toggleAntiAfk(enable) {
     const name = this.realUsername || this.options.username;
     if (!this.bot?.entity) {
@@ -345,10 +384,10 @@ export class MinecraftBot {
     }
     if (shouldEnable) {
       this.startAntiAfk();
-      this.send(msg(`**${name}** — anti-AFK **enabled** ✅`));
+      this.send(msg(`⚙️ **Anti-AFK Enabled**\n**${name}** will now perform anti-AFK actions.`));
     } else {
       this.stopAntiAfk();
-      this.send(msg(`**${name}** — anti-AFK **disabled** ⏸️`));
+      this.send(msg(`⏸️ **Anti-AFK Disabled**\n**${name}** has stopped anti-AFK actions.`));
     }
   }
 
@@ -360,7 +399,7 @@ export class MinecraftBot {
     }
     this.bot.setControlState('jump', true);
     setTimeout(() => { if (this.bot) this.bot.setControlState('jump', false); }, 400);
-    this.send(msg(`**${name}** jumped`));
+    this.send(msg(`🦘 **Action**\n**${name}** performed a jump.`));
   }
 
   say(text) {
@@ -371,12 +410,13 @@ export class MinecraftBot {
     }
     const truncated = text.length > MC_CHAT_LIMIT ? text.slice(0, MC_CHAT_LIMIT) : text;
     this.bot.chat(truncated);
-    this.send(msg(`**${name}** said: ${truncated}`));
+    this.send(msg(`💬 **Chat Message Sent**\n**${name}**: ${truncated}`));
   }
 
   stop() {
     this.isStopping = true;
     this.stopAntiAfk();
+    this.stopHeartbeat();
     if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
     if (this.smpTimeout) clearTimeout(this.smpTimeout);
     if (this.bot) {

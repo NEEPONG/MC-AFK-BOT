@@ -27,7 +27,7 @@ export class BotManager {
   joinCracked(options, channel) {
     const key = `${options.username}@${options.host}`;
     if (this.bots.has(key)) {
-      return channel.send(msg(`**${options.username}** is already active on **${options.host}**`));
+      return channel.send(msg(`⚠️ **Duplicate Bot**\n**${options.username}** is already active on **${options.host}**.`));
     }
 
     // FIX: Pass the stable persisted password into MinecraftBot instead of
@@ -65,7 +65,7 @@ export class BotManager {
         )
     );
     if (alreadyRunning) {
-      return channel.send(msg(`You already have a premium bot on **${options.host}**`));
+      return channel.send(msg(`⚠️ **Duplicate Bot**\nYou already have a premium bot on **${options.host}**.`));
     }
 
     // Mutable closure key — starts as pending, updated to real MC username after spawn
@@ -104,7 +104,7 @@ export class BotManager {
     if (this.bots.has(exactKey)) {
       this.bots.get(exactKey).stop();
       this.bots.delete(exactKey);
-      return channel.send(msg(`**${username}** disconnected from **${host}**`));
+      return channel.send(msg(`🛑 **Disconnected**\n**${username}** has been disconnected from **${host}**.`));
     }
 
     // Case 3: pre-spawn premium bot — key is "msa:discordId@host", not known to user.
@@ -116,11 +116,11 @@ export class BotManager {
       ) {
         bot.stop();
         this.bots.delete(key);
-        return channel.send(msg(`**${username}** disconnected from **${host}**`));
+        return channel.send(msg(`🛑 **Disconnected**\n**${username}** has been disconnected from **${host}**.`));
       }
     }
 
-    return channel.send(msg(`no bot named **${username}** on **${host}**`));
+    return channel.send(msg(`❓ **Bot Not Found**\nThere is no active bot named **${username}** on **${host}**.`));
   }
 
   // Force a bot to jump, identified by username + host.
@@ -141,7 +141,7 @@ export class BotManager {
       }
     }
 
-    channel.send(msg(`no bot named **${username}** on **${host}**`));
+    channel.send(msg(`❓ **Bot Not Found**\nThere is no active bot named **${username}** on **${host}**.`));
   }
 
   // FIX: say() now requires host parameter to correctly identify the bot when
@@ -166,7 +166,7 @@ export class BotManager {
       }
     }
 
-    channel.send(msg(`no bot named **${username}** on **${host}**`));
+    channel.send(msg(`❓ **Bot Not Found**\nThere is no active bot named **${username}** on **${host}**.`));
   }
 
   // Toggle anti-AFK for a bot by username + host.
@@ -186,26 +186,26 @@ export class BotManager {
         return;
       }
     }
-    channel.send(msg(`no bot named **${username}** on **${host}**`));
+    channel.send(msg(`❓ **Bot Not Found**\nThere is no active bot named **${username}** on **${host}**.`));
   }
 
   // Return a V2 message listing all active bots and their state
   getStatus() {
     if (this.bots.size === 0) {
-      return msg('no active bots');
+      return msg('ℹ️ **No active bots running.**');
     }
 
     const rows = [...this.bots.values()].map((bot) => {
       const name = bot.realUsername || bot.options.username;
-      const state = bot.bot?.entity ? 'online' : 'connecting';
-      return `**${name}** — ${bot.options.host}:${bot.options.port} — ${state}`;
+      const state = bot.bot?.entity ? '🟢 Online' : '🔄 Connecting';
+      return `👤 **${name}** — ${state}`;
     });
 
     const count = rows.length;
     return msgList(
-      '**Active Bots**',
+      '📊 **Active Bots Status**',
       rows,
-      `-# ${count} bot${count === 1 ? '' : 's'} running`
+      `-# Total: ${count} bot${count === 1 ? '' : 's'} running`
     );
   }
 }

@@ -19,6 +19,8 @@ if (!process.env.DISCORD_TOKEN) {
 }
 
 const GUILD_ID = process.env.GUILD_ID?.trim() || null;
+const DEFAULT_HOST = 'play.amorycraft.com';
+const DEFAULT_PORT = 25565;
 
 // ─── Client ───────────────────────────────────────────────────────────────────
 
@@ -45,13 +47,13 @@ client.on('clientReady', () => {
 // ─── Help ─────────────────────────────────────────────────────────────────────
 
 const COMMANDS = [
-  { usage: '!join <ip[:port]> [username]', desc: 'Join a cracked server.' },
-  { usage: '!premjoin <ip[:port]>', desc: 'Join an online-mode server via Microsoft account.' },
-  { usage: '!leave <ip> <username>', desc: 'Disconnect a bot.' },
-  { usage: '!say <ip> <username> <message>', desc: 'Send a chat message in-game.' },
+  { usage: '!join [username]', desc: 'Join the server.' },
+  { usage: '!premjoin', desc: 'Join the server via Microsoft account.' },
+  { usage: '!leave <username>', desc: 'Disconnect a bot.' },
+  { usage: '!say <username> <message>', desc: 'Send a chat message in-game.' },
   { usage: '!bots', desc: 'List all active bots.' },
-  { usage: '!jump <ip> <username>', desc: 'Force a bot to jump.' },
-  { usage: '!afk <ip> <username> <on|off>', desc: 'Enable or disable anti-AFK.' },
+  { usage: '!jump <username>', desc: 'Force a bot to jump.' },
+  { usage: '!afk <username> <on|off>', desc: 'Enable or disable anti-AFK.' },
   { usage: '!help', desc: 'Show this reference.' },
 ];
 
@@ -142,50 +144,41 @@ client.on('messageCreate', async (message) => {
     return message.reply(buildHelp());
   }
 
-  // !join <ip[:port]> [username]  —  cracked / offline-mode server
+  // !join [username]  —  cracked / offline-mode server
   if (command === '!join') {
-    if (!args[1]) return message.reply(msg('usage: `!join <ip[:port]> [username]`'));
-    const [host, rawPort] = args[1].split(':');
-    const port = parseInt(rawPort) || 25565;
-    const username = args[2] || `AFK_${Math.floor(Math.random() * 9999)}`;
+    const username = args[1] || `AFK_${Math.floor(Math.random() * 9999)}`;
 
     // FIX: Validate username before attempting to connect
     if (!isValidUsername(username)) {
       return message.reply(msg(`invalid username **${username}**\n-# Must be 3-16 characters, letters/numbers/underscores only.`));
     }
 
-    botManager.joinCracked({ host, port, username }, message.channel);
+    botManager.joinCracked({ host: DEFAULT_HOST, port: DEFAULT_PORT, username }, message.channel);
     return;
   }
 
-  // !premjoin <ip[:port]>  —  online-mode server via Microsoft account
+  // !premjoin  —  online-mode server via Microsoft account
   if (command === '!premjoin') {
-    if (!args[1]) return message.reply(msg('usage: `!premjoin <ip[:port]>`'));
-    const [host, rawPort] = args[1].split(':');
-    const port = parseInt(rawPort) || 25565;
-    botManager.joinPremium(message.author.id, { host, port }, message.channel);
+    botManager.joinPremium(message.author.id, { host: DEFAULT_HOST, port: DEFAULT_PORT }, message.channel);
     return;
   }
 
-  // !leave <ip> <username>
+  // !leave <username>
   if (command === '!leave') {
-    if (!args[1] || !args[2]) return message.reply(msg('usage: `!leave <ip> <username>`'));
-    const [host] = args[1].split(':');
-    botManager.removeBot(args[2], host, message.channel);
+    if (!args[1]) return message.reply(msg('usage: `!leave <username>`'));
+    const username = args[1];
+    botManager.removeBot(username, DEFAULT_HOST, message.channel);
     return;
   }
 
-  // FIX: !say now requires <ip> so BotManager can find the correct bot when
-  // the same username exists on multiple servers.
-  // New usage: !say <ip> <username> <message...>
+  // !say <username> <message...>
   if (command === '!say') {
-    if (!args[1] || !args[2] || !args[3]) {
-      return message.reply(msg('usage: `!say <ip> <username> <message>`'));
+    if (!args[1] || !args[2]) {
+      return message.reply(msg('usage: `!say <username> <message>`'));
     }
-    const [host] = args[1].split(':');
-    const username = args[2];
-    const chatText = args.slice(3).join(' ');
-    botManager.say(username, host, chatText, message.channel);
+    const username = args[1];
+    const chatText = args.slice(2).join(' ');
+    botManager.say(username, DEFAULT_HOST, chatText, message.channel);
     return;
   }
 
@@ -194,26 +187,25 @@ client.on('messageCreate', async (message) => {
     return message.reply(botManager.getStatus());
   }
 
-  // !jump <ip> <username>
+  // !jump <username>
   if (command === '!jump') {
-    if (!args[1] || !args[2]) return message.reply(msg('usage: `!jump <ip> <username>`'));
-    const [host] = args[1].split(':');
-    botManager.jump(args[2], host, message.channel);
+    if (!args[1]) return message.reply(msg('usage: `!jump <username>`'));
+    const username = args[1];
+    botManager.jump(username, DEFAULT_HOST, message.channel);
     return;
   }
 
-  // !afk <ip> <username> <on|off>
+  // !afk <username> <on|off>
   if (command === '!afk') {
-    if (!args[1] || !args[2] || !args[3]) {
-      return message.reply(msg('usage: `!afk <ip> <username> <on|off>`'));
+    if (!args[1] || !args[2]) {
+      return message.reply(msg('usage: `!afk <username> <on|off>`'));
     }
-    const [host] = args[1].split(':');
-    const username = args[2];
-    const flag = args[3].toLowerCase();
+    const username = args[1];
+    const flag = args[2].toLowerCase();
     if (flag !== 'on' && flag !== 'off') {
-      return message.reply(msg('usage: `!afk <ip> <username> <on|off>`\n-# Third argument must be `on` or `off`'));
+      return message.reply(msg('usage: `!afk <username> <on|off>`\n-# Third argument must be `on` or `off`'));
     }
-    botManager.toggleAntiAfk(username, host, message.channel, flag === 'on');
+    botManager.toggleAntiAfk(username, DEFAULT_HOST, message.channel, flag === 'on');
     return;
   }
 });
