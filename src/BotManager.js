@@ -169,6 +169,26 @@ export class BotManager {
     channel.send(msg(`no bot named **${username}** on **${host}**`));
   }
 
+  // Toggle anti-AFK for a bot by username + host.
+  // enable: true = force on, false = force off, undefined = toggle
+  toggleAntiAfk(username, host, channel, enable) {
+    const exactKey = `${username}@${host}`;
+    if (this.bots.has(exactKey)) {
+      this.bots.get(exactKey).toggleAntiAfk(enable);
+      return;
+    }
+    for (const bot of this.bots.values()) {
+      if (
+        bot.options.host === host &&
+        (bot.realUsername === username || bot.options.username === username)
+      ) {
+        bot.toggleAntiAfk(enable);
+        return;
+      }
+    }
+    channel.send(msg(`no bot named **${username}** on **${host}**`));
+  }
+
   // Return a V2 message listing all active bots and their state
   getStatus() {
     if (this.bots.size === 0) {

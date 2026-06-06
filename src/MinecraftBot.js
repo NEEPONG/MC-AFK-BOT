@@ -68,6 +68,7 @@ export class MinecraftBot {
     this.jumpInterval = null;
     this.lookInterval = null;
     this.reconnectTimeout = null;
+    this.smpTimeout = null;
     this.isStopping = false;
     this.isFatal = false;
     this.isDisconnecting = false;
@@ -85,7 +86,7 @@ export class MinecraftBot {
 
   // Safely send a V2 container message to Discord; swallows channel errors
   send(content) {
-    this.discordChannel.send(content).catch(() => {});
+    this.discordChannel.send(content).catch(() => { });
   }
 
   // ─── Microsoft pre-authentication ────────────────────────────────────────────
@@ -213,6 +214,14 @@ export class MinecraftBot {
       this.send(msg(`**${name}** connected to **${this.options.host}**`));
       this.startAntiAfk();
 
+      // Automatically send /smp after 15 seconds
+      if (this.smpTimeout) clearTimeout(this.smpTimeout);
+      this.smpTimeout = setTimeout(() => {
+        if (this.bot && !this.isStopping) {
+          this.bot.chat('/smp');
+        }
+      }, 15_000);
+
       const defaultMove = new Movements(this.bot);
       this.bot.pathfinder.setMovements(defaultMove);
     });
@@ -238,13 +247,7 @@ export class MinecraftBot {
       }
     });
 
-    // Chat relay — plain text to avoid rate-limiting on high-traffic servers
-    this.bot.on('chat', (username, chatMessage) => {
-      if (!this.bot || username === this.bot.username) return;
-      this.discordChannel
-        .send(`\`${this.bot.username}\` **${username}:** ${chatMessage}`)
-        .catch(() => {});
-    });
+    // Chat relay removed to prevent Minecraft chat forwarding to Discord
 
     this.bot.on('error', (err) => {
       if (this.isStopping || this.isFatal) return;
@@ -307,19 +310,11 @@ export class MinecraftBot {
     );
 
     if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
-    this.reconnectTimeout = setTimeout(() => this.connect().catch(() => {}), RECONNECT_DELAY_MS);
+    this.reconnectTimeout = setTimeout(() => this.connect().catch(() => { }), RECONNECT_DELAY_MS);
   }
 
   startAntiAfk() {
     this.stopAntiAfk();
-
-    // Jump every 5 seconds to prevent AFK kick
-    this.jumpInterval = setInterval(() => {
-      if (this.bot?.entity) {
-        this.bot.setControlState('jump', true);
-        setTimeout(() => { if (this.bot) this.bot.setControlState('jump', false); }, 400);
-      }
-    }, ANTI_AFK_INTERVAL_MS);
 
     // Rotate view every 30 seconds to simulate an active player
     this.lookInterval = setInterval(() => {
@@ -332,8 +327,29 @@ export class MinecraftBot {
   }
 
   stopAntiAfk() {
-    if (this.jumpInterval) { clearInterval(this.jumpInterval); this.jumpInterval = null; }
     if (this.lookInterval) { clearInterval(this.lookInterval); this.lookInterval = null; }
+  }
+
+  toggleAntiAfk(enable) {
+    const name = this.realUsername || this.options.username;
+    if (!this.bot?.entity) {
+      this.send(msg(`**${name}** — not in-game, cannot toggle anti-AFK`));
+      return;
+    }
+    const isRunning = !!(this.jumpInterval || this.lookInterval);
+    // If enable is undefined → toggle; otherwise set explicitly
+    const shouldEnable = enable === undefined ? !isRunning : enable;
+    if (shouldEnable === isRunning) {
+      this.send(msg(`**${name}** — anti-AFK is already **${isRunning ? 'on' : 'off'}**`));
+      return;
+    }
+    if (shouldEnable) {
+      this.startAntiAfk();
+      this.send(msg(`**${name}** — anti-AFK **enabled** ✅`));
+    } else {
+      this.stopAntiAfk();
+      this.send(msg(`**${name}** — anti-AFK **disabled** ⏸️`));
+    }
   }
 
   jump() {
@@ -362,6 +378,7 @@ export class MinecraftBot {
     this.isStopping = true;
     this.stopAntiAfk();
     if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+    if (this.smpTimeout) clearTimeout(this.smpTimeout);
     if (this.bot) {
       this.bot.removeAllListeners();
       try { this.bot.quit(); } catch { }
