@@ -2,11 +2,15 @@
   "defaultServer": "play.amorycraft.com:25565",
   "bots": [
     {
-      "username": "innovation",
+      "username": "xZoro",
       "auth": "offline"
     },
     {
-      "username": "innovations",
+      "username": "xLuffy",
+      "auth": "offline"
+    },
+    {
+      "username": "xSunji",
       "auth": "offline"
     }
   ]
