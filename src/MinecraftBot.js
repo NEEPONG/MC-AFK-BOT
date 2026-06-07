@@ -278,6 +278,12 @@ export class MinecraftBot {
         );
         this.stop();
         if (this.onFatal) this.onFatal();
+      } else {
+        console.warn(`[MinecraftBot] Non-fatal connection error: ${err.message || err.code}`);
+        if (!this.isDisconnecting) {
+          this.isDisconnecting = true;
+          this.handleDisconnect();
+        }
       }
     });
 
