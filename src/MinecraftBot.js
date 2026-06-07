@@ -7,7 +7,7 @@ import mineflayer from 'mineflayer';
 import { pathfinder, Movements } from 'mineflayer-pathfinder';
 import { msg, msgSections } from './ui.js';
 
-const FATAL_CODES = new Set(['ENOTFOUND', 'ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET']);
+const FATAL_CODES = new Set(['ENOTFOUND', 'ECONNREFUSED', 'ETIMEDOUT']);
 const INITIAL_RECONNECT_DELAY_MS = 15_000;
 const MAX_RECONNECT_DELAY_MS = 5 * 60_000;
 const ANTI_AFK_INTERVAL_MS = 5_000;
@@ -65,7 +65,7 @@ export class MinecraftBot {
     this.onFatal = onFatal;
     this.onRealUsername = onRealUsername;
     this.bot = null;
-    this.jumpInterval = null;
+    this.jumpTimeout = null;
     this.lookInterval = null;
     this.reconnectTimeout = null;
     this.smpTimeout = null;
@@ -347,10 +347,26 @@ export class MinecraftBot {
         this.bot.look(yaw, pitch, false);
       }
     }, 30_000);
+
+    // Random jump loop (averages to ~20 seconds, randomized between 15-25s to avoid detection)
+    const scheduleNextJump = () => {
+      const delay = 15000 + Math.floor(Math.random() * 10000);
+      this.jumpTimeout = setTimeout(() => {
+        if (this.bot?.entity) {
+          this.bot.setControlState('jump', true);
+          setTimeout(() => {
+            if (this.bot) this.bot.setControlState('jump', false);
+          }, 400);
+        }
+        scheduleNextJump();
+      }, delay);
+    };
+    scheduleNextJump();
   }
 
   stopAntiAfk() {
     if (this.lookInterval) { clearInterval(this.lookInterval); this.lookInterval = null; }
+    if (this.jumpTimeout) { clearTimeout(this.jumpTimeout); this.jumpTimeout = null; }
   }
 
   startHeartbeat() {
@@ -381,7 +397,7 @@ export class MinecraftBot {
       this.send(msg(`**${name}** — not in-game, cannot toggle anti-AFK`));
       return;
     }
-    const isRunning = !!(this.jumpInterval || this.lookInterval);
+    const isRunning = !!(this.jumpTimeout || this.lookInterval);
     // If enable is undefined → toggle; otherwise set explicitly
     const shouldEnable = enable === undefined ? !isRunning : enable;
     if (shouldEnable === isRunning) {
