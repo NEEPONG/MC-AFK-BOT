@@ -65,7 +65,7 @@ export class MinecraftBot {
     this.onFatal = onFatal;
     this.onRealUsername = onRealUsername;
     this.bot = null;
-    this.jumpTimeout = null;
+    this.jumpInterval = null;
     this.lookInterval = null;
     this.reconnectTimeout = null;
     this.smpTimeout = null;
@@ -347,26 +347,10 @@ export class MinecraftBot {
         this.bot.look(yaw, pitch, false);
       }
     }, 30_000);
-
-    // Random jump loop (averages to ~20 seconds, randomized between 15-25s to avoid detection)
-    const scheduleNextJump = () => {
-      const delay = 15000 + Math.floor(Math.random() * 10000);
-      this.jumpTimeout = setTimeout(() => {
-        if (this.bot?.entity) {
-          this.bot.setControlState('jump', true);
-          setTimeout(() => {
-            if (this.bot) this.bot.setControlState('jump', false);
-          }, 400);
-        }
-        scheduleNextJump();
-      }, delay);
-    };
-    scheduleNextJump();
   }
 
   stopAntiAfk() {
     if (this.lookInterval) { clearInterval(this.lookInterval); this.lookInterval = null; }
-    if (this.jumpTimeout) { clearTimeout(this.jumpTimeout); this.jumpTimeout = null; }
   }
 
   startHeartbeat() {
@@ -397,7 +381,7 @@ export class MinecraftBot {
       this.send(msg(`**${name}** — not in-game, cannot toggle anti-AFK`));
       return;
     }
-    const isRunning = !!(this.jumpTimeout || this.lookInterval);
+    const isRunning = !!(this.jumpInterval || this.lookInterval);
     // If enable is undefined → toggle; otherwise set explicitly
     const shouldEnable = enable === undefined ? !isRunning : enable;
     if (shouldEnable === isRunning) {
