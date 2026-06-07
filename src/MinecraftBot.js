@@ -4,7 +4,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import mineflayer from 'mineflayer';
-import { pathfinder, Movements } from 'mineflayer-pathfinder';
 import { msg, msgSections } from './ui.js';
 
 const FATAL_CODES = new Set(['ENOTFOUND', 'ECONNREFUSED', 'ETIMEDOUT']);
@@ -197,7 +196,6 @@ export class MinecraftBot {
     };
 
     this.bot = mineflayer.createBot(botOptions);
-    this.bot.loadPlugin(pathfinder);
 
     // Track last packet time to detect ghost connections
     this.bot.once('inject_allowed', () => {
@@ -240,9 +238,6 @@ export class MinecraftBot {
           }, 3000);
         }
       }, 5_000);
-
-      const defaultMove = new Movements(this.bot);
-      this.bot.pathfinder.setMovements(defaultMove);
     });
 
     // Intercept all server chat — catches AuthMe, nLogin, FastLogin prompts
