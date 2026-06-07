@@ -1,7 +1,13 @@
 // Made by Ayliee, All rights are reserved to AeroX Development
 
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { MinecraftBot } from './MinecraftBot.js';
 import { msg, msgList } from './ui.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CONFIG_PATH = path.join(__dirname, '..', 'config', 'bots.json');
 
 export class BotManager {
   constructor() {
@@ -12,6 +18,11 @@ export class BotManager {
     // still works after a !leave + !join cycle on the same server.
     // Key: "username@host", Value: password string
     this._authPasswords = new Map();
+
+    // Spawning Queue
+    this.joinQueue = [];
+    this.queueTimeout = null;
+    this.currentQueueBot = null;
   }
 
   // Retrieve or create a stable auth password for this username+host pair.
@@ -38,7 +49,18 @@ export class BotManager {
     const bot = new MinecraftBot(
       { ...options, auth: 'offline' },
       channel,
-      () => this.bots.delete(key),
+      () => {
+        this.bots.delete(key);
+        if (this.currentQueueBot === bot) {
+          this.currentQueueBot = null;
+          if (this.queueTimeout) {
+            clearTimeout(this.queueTimeout);
+            this.queueTimeout = null;
+          }
+          channel.send(msg(`❌ **Queue Failed**\n**${options.username}** had a fatal error. Proceeding...`));
+          this.processQueue(channel, options.host, options.port);
+        }
+      },
       null,
       authPassword
     );
@@ -207,5 +229,139 @@ export class BotManager {
       rows,
       `-# Total: ${count} bot${count === 1 ? '' : 's'} running`
     );
+  }
+
+  isBotActive(username, host) {
+    const exactKey = `${username}@${host}`;
+    if (this.bots.has(exactKey)) return true;
+    for (const bot of this.bots.values()) {
+      if (
+        bot.options.host === host &&
+        (bot.realUsername === username || bot.options.username === username)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  loadPresets() {
+    try {
+      if (fs.existsSync(CONFIG_PATH)) {
+        const data = fs.readFileSync(CONFIG_PATH, 'utf8');
+        return JSON.parse(data);
+      }
+    } catch (err) {
+      console.error('[BotManager] Failed to load presets:', err);
+    }
+    return { defaultServer: 'mc.serverip.com:25565', bots: [] };
+  }
+
+  joinPresetQueue(channel) {
+    // Stop any existing queue running
+    this.stopQueue();
+
+    const config = this.loadPresets();
+    const defaultServer = config.defaultServer || 'mc.serverip.com:25565';
+    const [host, rawPort] = defaultServer.split(':');
+    const port = parseInt(rawPort) || 25565;
+
+    // Filter bots from presets that are not currently active
+    const inactivePresets = config.bots.filter(
+      (b) => !this.isBotActive(b.username, host)
+    );
+
+    if (inactivePresets.length === 0) {
+      return channel.send(msg('ℹ️ **All preset bots are already connected/running.**'));
+    }
+
+    this.joinQueue = [...inactivePresets];
+    channel.send(msg(`🟢 **Starting Queue**\nSpawning ${this.joinQueue.length} bots sequentially (waiting for each bot to transition to SMP)...`));
+
+    // Start processing
+    this.processQueue(channel, host, port);
+  }
+
+  processQueue(channel, host, port) {
+    if (this.queueTimeout) {
+      clearTimeout(this.queueTimeout);
+      this.queueTimeout = null;
+    }
+
+    if (this.joinQueue.length === 0) {
+      this.currentQueueBot = null;
+      channel.send(msg('✅ **Queue Completed**\nAll preset bots have been processed.'));
+      return;
+    }
+
+    const nextBot = this.joinQueue.shift();
+    if (this.isBotActive(nextBot.username, host)) {
+      // Already active, skip immediately
+      this.processQueue(channel, host, port);
+      return;
+    }
+
+    // Connect the bot
+    this.joinCracked({ host, port, username: nextBot.username }, channel);
+
+    const key = `${nextBot.username}@${host}`;
+    const botInstance = this.bots.get(key);
+
+    if (botInstance) {
+      this.currentQueueBot = botInstance;
+
+      // When the current bot has entered SMP and waited for transition, proceed to the next bot
+      botInstance.onSmpJoined = () => {
+        if (this.currentQueueBot === botInstance) {
+          this.currentQueueBot = null;
+          if (this.queueTimeout) {
+            clearTimeout(this.queueTimeout);
+            this.queueTimeout = null;
+          }
+          channel.send(msg(`⏩ **Queue Proceeding**\n**${nextBot.username}** successfully joined SMP. Starting next bot...`));
+          // Wait 2 seconds of safety margin before launching next bot
+          setTimeout(() => this.processQueue(channel, host, port), 2000);
+        }
+      };
+
+      // Safety timeout: if bot takes more than 25 seconds (connection lost, captcha, lag), skip to next
+      this.queueTimeout = setTimeout(() => {
+        if (this.currentQueueBot === botInstance) {
+          this.currentQueueBot = null;
+          channel.send(msg(`⚠️ **Queue Timeout**\n**${nextBot.username}** took too long to join SMP. Proceeding...`));
+          this.processQueue(channel, host, port);
+        }
+      }, 25000);
+    } else {
+      // Fallback
+      this.processQueue(channel, host, port);
+    }
+  }
+
+  stopQueue() {
+    if (this.queueTimeout) {
+      clearTimeout(this.queueTimeout);
+      this.queueTimeout = null;
+    }
+    this.currentQueueBot = null;
+    this.joinQueue = [];
+  }
+
+  removeAllActiveBots(channel) {
+    // First cancel queue
+    this.stopQueue();
+
+    const count = this.bots.size;
+    if (count === 0) {
+      return channel.send(msg('ℹ️ **No active bots to disconnect.**'));
+    }
+
+    // Stop all bots
+    for (const bot of this.bots.values()) {
+      bot.stop();
+    }
+    this.bots.clear();
+
+    channel.send(msg(`🔴 **Disconnected All**\nSuccessfully disconnected and removed all **${count}** active bots.`));
   }
 }

@@ -232,8 +232,14 @@ export class MinecraftBot {
         if (this.bot && !this.isStopping) {
           this.bot.chat('/smp');
           this.send(msg(`🚀 **SMP Entered**\n**${name}** has entered the SMP server.`));
+          // Wait 3 seconds for sub-server transition, then trigger callback to proceed queue
+          setTimeout(() => {
+            if (this.bot && !this.isStopping && typeof this.onSmpJoined === 'function') {
+              this.onSmpJoined();
+            }
+          }, 3000);
         }
-      }, 15_000);
+      }, 5_000);
 
       const defaultMove = new Movements(this.bot);
       this.bot.pathfinder.setMovements(defaultMove);

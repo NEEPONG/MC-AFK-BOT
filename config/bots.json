@@ -1,0 +1,13 @@
+{
+  "defaultServer": "play.amorycraft.com:25565",
+  "bots": [
+    {
+      "username": "innovation",
+      "auth": "offline"
+    },
+    {
+      "username": "innovations",
+      "auth": "offline"
+    }
+  ]
+}

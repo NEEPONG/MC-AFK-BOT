@@ -51,7 +51,10 @@ const COMMANDS = [
   { usage: '!premjoin', desc: 'Join the server via Microsoft account.' },
   { usage: '!leave <username>', desc: 'Disconnect a bot.' },
   { usage: '!say <username> <message>', desc: 'Send a chat message in-game.' },
+  { usage: '!joinall', desc: 'Connect all bots defined in config.' },
+  { usage: '!leaveall', desc: 'Disconnect all active bots.' },
   { usage: '!bots', desc: 'List all active bots.' },
+  { usage: '!bot', desc: 'List all active bots (alias).' },
   { usage: '!jump <username>', desc: 'Force a bot to jump.' },
   { usage: '!afk <username> <on|off>', desc: 'Enable or disable anti-AFK.' },
   { usage: '!help', desc: 'Show this reference.' },
@@ -90,6 +93,8 @@ function buildHelp() {
 
   return { components: [c], flags: MessageFlags.IsComponentsV2 };
 }
+
+// Controls panel helpers removed
 
 // ─── Per-user command rate limiting ───────────────────────────────────────────
 // FIX: No rate limiting existed — any user could spam commands to spawn bots.
@@ -131,7 +136,7 @@ client.on('messageCreate', async (message) => {
 
   // Only process known commands before rate-limit check to avoid wasting the
   // cooldown slot on unrelated messages
-  const knownCommands = ['!help', '!join', '!premjoin', '!leave', '!say', '!bots', '!jump', '!afk'];
+  const knownCommands = ['!help', '!join', '!premjoin', '!leave', '!say', '!bots', '!bot', '!joinall', '!leaveall', '!jump', '!afk'];
   if (!knownCommands.includes(command)) return;
 
   // FIX: Rate limit check — applied after command recognition
@@ -182,9 +187,21 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  // !bots
-  if (command === '!bots') {
+  // !bots / !bot
+  if (command === '!bots' || command === '!bot') {
     return message.reply(botManager.getStatus());
+  }
+
+  // !joinall
+  if (command === '!joinall') {
+    botManager.joinPresetQueue(message.channel);
+    return;
+  }
+
+  // !leaveall
+  if (command === '!leaveall') {
+    botManager.removeAllActiveBots(message.channel);
+    return;
   }
 
   // !jump <username>
