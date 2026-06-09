@@ -68,6 +68,7 @@ export class MinecraftBot {
     this.lookInterval = null;
     this.reconnectTimeout = null;
     this.smpTimeout = null;
+    this.smpJumpTimeout = null;
     this.isStopping = false;
     this.isFatal = false;
     this.isDisconnecting = false;
@@ -230,6 +231,14 @@ export class MinecraftBot {
         if (this.bot && !this.isStopping) {
           this.bot.chat('/smp');
           this.send(msg(`🚀 **SMP Entered**\n**${name}** has entered the SMP server.`));
+          
+          if (this.smpJumpTimeout) clearTimeout(this.smpJumpTimeout);
+          this.smpJumpTimeout = setTimeout(() => {
+            if (this.bot && !this.isStopping) {
+              this.jump();
+            }
+          }, 5000);
+
           // Wait 3 seconds for sub-server transition, then trigger callback to proceed queue
           setTimeout(() => {
             if (this.bot && !this.isStopping && typeof this.onSmpJoined === 'function') {
@@ -426,6 +435,7 @@ export class MinecraftBot {
     this.stopHeartbeat();
     if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
     if (this.smpTimeout) clearTimeout(this.smpTimeout);
+    if (this.smpJumpTimeout) clearTimeout(this.smpJumpTimeout);
     if (this.bot) {
       this.bot.removeAllListeners();
       try { this.bot.quit(); } catch { }
